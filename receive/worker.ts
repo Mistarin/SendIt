@@ -5,7 +5,7 @@
 
 import wasmUrl from "./wasm-url";
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
-import { decodeOpticalGrid } from "../shared/optical-grid";
+import { decodeOpticalColorGrid, decodeOpticalGrid } from "../shared/optical-grid";
 
 prepareZXingModule({
   overrides: {
@@ -23,14 +23,18 @@ ctx.onmessage = async (e: MessageEvent) => {
   const { id, buf, w, h } = e.data as { id: number; buf: ArrayBuffer; w: number; h: number };
   try {
     const img = new ImageData(new Uint8ClampedArray(buf), w, h);
+    const color = decodeOpticalColorGrid(img);
+    if (color.length > 0) {
+      ctx.postMessage({ id, frames: color });
+      return;
+    }
     const optical = decodeOpticalGrid(img);
     if (optical.length > 0) {
       ctx.postMessage({ id, frames: optical });
       return;
     }
-    const results = await readBarcodes(img, { formats: ["QRCode"], maxNumberOfSymbols: 1 });
-    const r = results.find((x) => x.isValid && x.bytes.length > 0);
-    ctx.postMessage({ id, frames: r ? [r.bytes] : [] });
+    const results = await readBarcodes(img, { formats: ["QRCode"], maxNumberOfSymbols: 4 });
+    ctx.postMessage({ id, frames: results.filter((x) => x.isValid && x.bytes.length > 0).map((x) => x.bytes) });
   } catch {
     ctx.postMessage({ id, frames: [] });
   }

@@ -12,9 +12,9 @@ export const DEFAULT_TX_FPS = 20;
 export const DEFAULT_FRAME_BYTES = 1000;
 
 export const SEND_PRESETS = {
-  compatibility: { txFps: 20, frameBytes: 1000 },
-  balanced: { txFps: NO_SIGNAL_HINT_TX_FPS, frameBytes: NO_SIGNAL_HINT_FRAME_BYTES },
-  dense: { txFps: 60, frameBytes: 2953 },
+  compatibility: { transport: "qr", txFps: 20, frameBytes: 1000 },
+  grid: { transport: "grid", txFps: NO_SIGNAL_HINT_TX_FPS, frameBytes: NO_SIGNAL_HINT_FRAME_BYTES },
+  color: { transport: "color", txFps: 30, frameBytes: 2128 },
 } as const;
 
 // The hint values appear in these lists by construction, not by coincidence.
@@ -24,6 +24,7 @@ export const FRAME_BYTES_OPTIONS: readonly number[] = [
   1000,
   NO_SIGNAL_HINT_FRAME_BYTES,
   1850,
+  2128,
   2331,
-  SEND_PRESETS.dense.frameBytes,
+  2953,
 ];

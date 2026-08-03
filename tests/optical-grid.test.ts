@@ -3,6 +3,9 @@ import test from "node:test";
 import {
   OPTICAL_TILE_MODULES,
   OPTICAL_TILE_PAYLOAD_BYTES,
+  OPTICAL_COLOR_TILE_PAYLOAD_BYTES,
+  rasterizeColorGrid,
+  decodeOpticalColorGrid,
   rasterizeOpticalGrid,
   decodeOpticalGrid,
   decodeOpticalTile,
@@ -40,4 +43,22 @@ test("a complete optical grid returns all four payloads", () => {
   }
   const decoded = decodeOpticalGrid({ width: raster.size, height: raster.size, data } as ImageData);
   assert.deepEqual(decoded, tiles.map((tile) => tile.payload));
+});
+
+test("the color grid round-trips four payloads", () => {
+  const tiles = [0, 1, 2, 3].map((index) => ({
+    index,
+    count: 4,
+    payload: Uint8Array.from({ length: OPTICAL_COLOR_TILE_PAYLOAD_BYTES }, (_, i) => (i * 53 + index) & 0xff),
+  }));
+  const raster = rasterizeColorGrid(tiles);
+  const raw = new Uint8Array(raster.pixels.buffer);
+  const data = new Uint8ClampedArray(raster.size * raster.size * 4);
+  for (let i = 0; i < raster.pixels.length; i++) {
+    data[i * 4] = raw[i * 4]!;
+    data[i * 4 + 1] = raw[i * 4 + 1]!;
+    data[i * 4 + 2] = raw[i * 4 + 2]!;
+    data[i * 4 + 3] = 255;
+  }
+  assert.deepEqual(decodeOpticalColorGrid({ width: raster.size, height: raster.size, data } as ImageData), tiles.map((tile) => tile.payload));
 });

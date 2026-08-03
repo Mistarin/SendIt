@@ -15,7 +15,7 @@
 import QRCode from "qrcode";
 import { fitQrDisplaySize } from "../shared/display";
 import { rasterizeQr } from "../shared/qr-raster";
-import { OPTICAL_TILE_PAYLOAD_BYTES, rasterizeOpticalGrid } from "../shared/optical-grid";
+import { OPTICAL_COLOR_TILE_PAYLOAD_BYTES, rasterizeColorGrid } from "../shared/optical-grid";
 import { formatBytes } from "../shared/format";
 import {
   MAX_SOURCE_BLOCKS,
@@ -41,7 +41,7 @@ import { requestScreenWakeLock } from "../shared/wake-lock";
 import { SEND_PRESETS } from "../shared/send-settings";
 
 const MARGIN = 4; // quiet-zone modules
-const LOOKAHEAD = 3;
+const LOOKAHEAD = 6;
 
 // `npm run demo` (vite --mode demo). Locks the sender to the two bundled
 // payloads so the app can be left running in front of strangers without
@@ -65,7 +65,6 @@ const modeInputs = [...document.querySelectorAll<HTMLInputElement>('input[name="
 const cfgFps = document.getElementById("cfg-fps") as HTMLSelectElement;
 const cfgBytes = document.getElementById("cfg-bytes") as HTMLSelectElement;
 const cfgProfile = document.getElementById("cfg-profile") as HTMLSelectElement;
-const cfgTransport = document.getElementById("cfg-transport") as HTMLSelectElement;
 const cfgEcc = document.getElementById("cfg-ecc") as HTMLSelectElement;
 const cfgSize = document.getElementById("cfg-size") as HTMLInputElement;
 
@@ -81,6 +80,22 @@ let resizeDisplay: (() => void) | null = null;
 
 const specsLine = statusLine(specs);
 const setStatus = specsLine.setStatus;
+
+/** Convert the raster's packed pixels to explicit RGBA bytes. Keeping this
+ * conversion here avoids relying on the host CPU's Uint32 byte order when a
+ * browser constructs ImageData. */
+function imageDataFromRaster(pixels: Uint32Array, size: number): ImageData {
+  const rgba = new Uint8ClampedArray(pixels.length * 4);
+  for (let i = 0; i < pixels.length; i++) {
+    const pixel = pixels[i]!;
+    const offset = i * 4;
+    rgba[offset] = pixel & 0xff;
+    rgba[offset + 1] = (pixel >>> 8) & 0xff;
+    rgba[offset + 2] = (pixel >>> 16) & 0xff;
+    rgba[offset + 3] = (pixel >>> 24) & 0xff;
+  }
+  return new ImageData(rgba, size, size);
+}
 
 /**
  * Errors also hide the stage — a stale QR stream pulsing away under a
@@ -214,7 +229,7 @@ async function main() {
   }
   applyMode();
   window.addEventListener("resize", () => resizeDisplay?.());
-  for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize, cfgTransport]) {
+  for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize]) {
     el.addEventListener("change", () => {
       void startStream();
     });
@@ -252,8 +267,9 @@ async function startStream(revealStage = false) {
   if (gen !== generation) return; // superseded while fetching
   const txFps = Number(cfgFps.value);
   const requestedFrameBytes = Number(cfgBytes.value);
-  const frameBytes = cfgTransport.value === "optical"
-    ? Math.min(requestedFrameBytes, OPTICAL_TILE_PAYLOAD_BYTES)
+  const transport = SEND_PRESETS[cfgProfile.value as keyof typeof SEND_PRESETS]?.transport ?? "qr";
+  const frameBytes = transport === "color"
+    ? Math.min(requestedFrameBytes, OPTICAL_COLOR_TILE_PAYLOAD_BYTES)
     : requestedFrameBytes;
   const ecc = cfgEcc.value as "L" | "M" | "Q" | "H";
   const displayPx = Number(cfgSize.value);
@@ -286,8 +302,15 @@ async function startStream(revealStage = false) {
     payloadFnv: fnv1a(payload),
   };
 
-  if (cfgTransport.value === "optical") {
-    startOpticalStream({
+  if (transport === "grid") {
+    startQrGridStream({
+      gen, txFps, frameBytes, name, fileSize, compression, transmittedSize,
+      encoder, header, displayPx, revealStage, ecc,
+    });
+    return;
+  }
+  if (transport === "color") {
+    startColorStream({
       gen,
       txFps,
       frameBytes,
@@ -361,7 +384,7 @@ async function startStream(revealStage = false) {
       );
     }
     const raster = rasterizeQr(qr.modules.size, qr.modules.data, MARGIN);
-    return new ImageData(new Uint8ClampedArray(raster.pixels.buffer), raster.size, raster.size);
+    return imageDataFromRaster(raster.pixels, raster.size);
   };
 
   /**
@@ -410,7 +433,82 @@ async function startStream(revealStage = false) {
   requestAnimationFrame(tick);
 }
 
-function startOpticalStream(args: {
+function startQrGridStream(args: {
+  gen: number;
+  txFps: number;
+  frameBytes: number;
+  name: string;
+  fileSize: number;
+  compression: "none" | "gzip";
+  transmittedSize: number;
+  encoder: LTEncoder;
+  header: FrameHeader;
+  displayPx: number;
+  revealStage: boolean;
+  ecc: "L" | "M" | "Q" | "H";
+}): void {
+  const { gen, txFps, frameBytes, name, fileSize, compression, transmittedSize, encoder, header, displayPx, revealStage, ecc } = args;
+  const staging = document.createElement("canvas");
+  const queue: ImageData[] = [];
+  let version: number | undefined;
+  let rasterSize = 0;
+  let scale = 1;
+  let nextSeq = 0;
+  stage.hidden = false;
+  const sizeCanvas = (size: number) => {
+    const dpr = window.devicePixelRatio || 1;
+    const containerWidth = stage.parentElement?.getBoundingClientRect().width ?? window.innerWidth;
+    const cssBudget = fitQrDisplaySize(window.innerWidth, window.innerHeight, containerWidth, displayPx);
+    scale = Math.max(1, Math.floor((cssBudget * dpr) / size));
+    staging.width = size; staging.height = size;
+    canvas.width = size * scale; canvas.height = size * scale;
+    canvas.style.width = `${(size * scale) / dpr}px`; canvas.style.height = `${(size * scale) / dpr}px`;
+  };
+  const makeFrame = (): ImageData => {
+    const rasters = [0, 1, 2, 3].map(() => {
+      const seq = nextSeq++;
+      const qr = QRCode.create([{ data: packFrame({ ...header, seq }, encoder.encode(seq)), mode: "byte" } as unknown as QRCode.QRCodeSegment], {
+        errorCorrectionLevel: ecc, version, maskPattern: 4,
+      });
+      if (version === undefined) version = qr.version;
+      const raster = rasterizeQr(qr.modules.size, qr.modules.data, MARGIN);
+      return raster;
+    });
+    const cell = rasters[0]!.size;
+    rasterSize = cell * 2 + MARGIN * 3;
+    const pixels = new Uint32Array(rasterSize * rasterSize).fill(0xffffffff);
+    for (let i = 0; i < rasters.length; i++) {
+      const raster = rasters[i]!;
+      const ox = MARGIN + (i % 2) * (cell + MARGIN);
+      const oy = MARGIN + Math.floor(i / 2) * (cell + MARGIN);
+      for (let y = 0; y < cell; y++) pixels.set(raster.pixels.subarray(y * cell, (y + 1) * cell), (oy + y) * rasterSize + ox);
+    }
+    if (staging.width !== rasterSize) {
+      sizeCanvas(rasterSize); resizeDisplay = () => sizeCanvas(rasterSize);
+      if (revealStage) scrollStageIntoView();
+      setStatus(`${txFps} FPS · 4× QR grid · ${frameBytes * 4} bytes / display frame · ${name} · ${formatBytes(fileSize)} · ${compression === "gzip" ? `gzip ${formatBytes(transmittedSize)}` : "no compression"} · K=${encoder.k}`);
+    }
+    return imageDataFromRaster(pixels, rasterSize);
+  };
+  let failed = false;
+  const pump = (max = LOOKAHEAD) => { if (failed || gen !== generation) return; try { for (let n = 0; n < max && queue.length < LOOKAHEAD; n++) queue.push(makeFrame()); } catch (err) { failed = true; showError(err instanceof Error ? err.message : String(err)); } };
+  pump();
+  const interval = 1000 / txFps;
+  let nextAt = performance.now();
+  const tick = (now: number) => {
+    if (gen !== generation || failed) return;
+    requestAnimationFrame(tick);
+    if (now < nextAt) return;
+    const img = queue.shift(); pump(1);
+    if (!img) { nextAt = now + interval; return; }
+    staging.getContext("2d")!.putImageData(img, 0, 0);
+    const ctx = canvas.getContext("2d")!; ctx.imageSmoothingEnabled = false; ctx.drawImage(staging, 0, 0, canvas.width, canvas.height);
+    nextAt += interval; if (now - nextAt > 3 * interval) nextAt = now + interval;
+  };
+  requestAnimationFrame(tick);
+}
+
+function startColorStream(args: {
   gen: number;
   txFps: number;
   frameBytes: number;
@@ -424,8 +522,8 @@ function startOpticalStream(args: {
   revealStage: boolean;
 }): void {
   const { gen, txFps, frameBytes, name, fileSize, compression, transmittedSize, encoder, header, displayPx, revealStage } = args;
-  if (frameBytes > OPTICAL_TILE_PAYLOAD_BYTES) {
-    showError(`Optical grid supports at most ${OPTICAL_TILE_PAYLOAD_BYTES} bytes per frame.`);
+  if (frameBytes > OPTICAL_COLOR_TILE_PAYLOAD_BYTES) {
+    showError(`Color grid supports at most ${OPTICAL_COLOR_TILE_PAYLOAD_BYTES} bytes per tile.`);
     return;
   }
   const staging = document.createElement("canvas");
@@ -455,7 +553,7 @@ function startOpticalStream(args: {
       count: 4,
       payload: packFrame({ ...header, seq: nextSeq++ }, encoder.encode(nextSeq - 1)),
     }));
-    const raster = rasterizeOpticalGrid(tiles);
+    const raster = rasterizeColorGrid(tiles);
     if (staging.width !== raster.size) {
       sizeCanvas(raster.size);
       resizeDisplay = () => sizeCanvas(raster.size);
@@ -467,7 +565,7 @@ function startOpticalStream(args: {
           `K=${encoder.k}`,
       );
     }
-    return new ImageData(new Uint8ClampedArray(raster.pixels.buffer), raster.size, raster.size);
+    return imageDataFromRaster(raster.pixels, raster.size);
   };
 
   let generatorFailed = false;
