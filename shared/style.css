@@ -85,6 +85,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .brand-logo { width: 25px; height: 25px; color: var(--accent); }
 .header-note, .mode-badge { display: none; }
+.mode-switch {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 5px 15px rgba(var(--accent-rgb), 0.1);
+  transition: transform 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+.mode-switch svg { width: 20px; height: 20px; }
+.mode-switch:hover { transform: translateY(-2px); background: white; box-shadow: 0 9px 20px rgba(var(--accent-rgb), 0.18); }
 
 .home-shell {
   width: min(100% - 40px, 1040px);

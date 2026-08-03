@@ -16,9 +16,9 @@ const BRAND_INNER =
   '11z"/></g></svg>Decimen Optical Transfer';
 
 /**
- * A standalone file has no siblings, so links to the other pages are dead ends.
- * Rewrites are exact-match and `required` ones throw when they miss, so editing
- * the markup breaks the build rather than silently shipping broken links.
+ * Standalone release artifacts are emitted beside one another, so the mode
+ * switch can point directly to the sibling standalone page. Rewrites are exact
+ * match and `required` ones throw when they miss.
  */
 export function rewriteStandaloneLinks(): Plugin {
   const rules: { from: string; to: string; required: boolean }[] = [
@@ -26,6 +26,16 @@ export function rewriteStandaloneLinks(): Plugin {
       from: `<a class="brand" href="../">${BRAND_INNER}</a>`,
       to: `<span class="brand">${BRAND_INNER}</span>`,
       required: true,
+    },
+    {
+      from: '<a class="mode-switch" href="../receive/" aria-label="Switch to Receive" title="Switch to Receive">',
+      to: '<a class="mode-switch" href="decimen-receiver.html" aria-label="Switch to Receive" title="Switch to Receive">',
+      required: false,
+    },
+    {
+      from: '<a class="mode-switch" href="../send/" aria-label="Switch to Send" title="Switch to Send">',
+      to: '<a class="mode-switch" href="decimen-sender.html" aria-label="Switch to Send" title="Switch to Send">',
+      required: false,
     },
     {
       from: 'Open <a href="../receive/">Receive</a> on the other device.',
