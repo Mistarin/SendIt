@@ -17,7 +17,8 @@ export interface PoolWorker {
 
 interface DecodeMessage {
   id: number;
-  bytes: Uint8Array | null;
+  bytes?: Uint8Array | null;
+  frames?: Uint8Array[];
 }
 
 export class DecodeWorkerPool {
@@ -75,10 +76,10 @@ export class DecodeWorkerPool {
       // A late message from a worker replaced after an error must not free the
       // slot now occupied by its replacement.
       if (this.workers[slot] !== worker) return;
-      const { id, bytes } = event.data as DecodeMessage;
+      const { id, bytes, frames } = event.data as DecodeMessage;
       if (id === -1) return; // warm-up ping, no frame attached
       this.busy[slot] = false;
-      if (bytes) this.onDecoded(bytes);
+      for (const frame of frames ?? (bytes ? [bytes] : [])) this.onDecoded(frame);
     };
     worker.onerror = () => {
       if (this.workers[slot] !== worker) return;

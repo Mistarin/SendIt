@@ -4,7 +4,9 @@ Send a file between two devices using nothing but a **screen and a camera**.
 One page displays the file as an endless stream of animated QR codes; another
 device points its camera at it and reconstructs the file. **No network path
 between the devices, no app, no pairing, no permissions beyond the camera.**
-The payload travels as light.
+The payload travels as light. The sender also offers an experimental **2×2
+optical grid** mode: four purpose-built monochrome symbols per screen frame,
+decoded by the matching receiver. Single QR remains the compatibility mode.
 
 This is a minimal proof of concept extracted from a larger
 experiment that reached **128 KB/s phone-to-phone** with denser frames,
@@ -199,6 +201,10 @@ capture/decode rates and busy workers, making a saturated decoder visible.
 | profile | Compatibility | 20 FPS and 1000 bytes/frame for the widest device range |
 | tx fps | 20 | use Balanced or Dense when the receiver is close and stable |
 | bytes / frame | 1000 (QR v20) | Compatibility is the safest starting point; Dense uses 2953 (QR v40) |
+
+The optical-grid transport caps each tile at 1068 bytes and sends four tiles
+per displayed frame. It is intended for a close, steady screen-to-camera setup;
+use Single QR when interoperability or difficult angles matter more than speed.
 
 Compatibility is the default. For a close-range transfer, choose Balanced or
 Dense. If a dense transfer crawls, switch back to Compatibility.

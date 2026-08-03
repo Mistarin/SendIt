@@ -15,6 +15,7 @@
 import QRCode from "qrcode";
 import { fitQrDisplaySize } from "../shared/display";
 import { rasterizeQr } from "../shared/qr-raster";
+import { OPTICAL_TILE_PAYLOAD_BYTES, rasterizeOpticalGrid } from "../shared/optical-grid";
 import { formatBytes } from "../shared/format";
 import {
   MAX_SOURCE_BLOCKS,
@@ -64,6 +65,7 @@ const modeInputs = [...document.querySelectorAll<HTMLInputElement>('input[name="
 const cfgFps = document.getElementById("cfg-fps") as HTMLSelectElement;
 const cfgBytes = document.getElementById("cfg-bytes") as HTMLSelectElement;
 const cfgProfile = document.getElementById("cfg-profile") as HTMLSelectElement;
+const cfgTransport = document.getElementById("cfg-transport") as HTMLSelectElement;
 const cfgEcc = document.getElementById("cfg-ecc") as HTMLSelectElement;
 const cfgSize = document.getElementById("cfg-size") as HTMLInputElement;
 
@@ -212,7 +214,7 @@ async function main() {
   }
   applyMode();
   window.addEventListener("resize", () => resizeDisplay?.());
-  for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize]) {
+  for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize, cfgTransport]) {
     el.addEventListener("change", () => {
       void startStream();
     });
@@ -249,7 +251,10 @@ async function startStream(revealStage = false) {
   const { name, size: fileSize, payload, compression, transmittedSize } = selectedFile;
   if (gen !== generation) return; // superseded while fetching
   const txFps = Number(cfgFps.value);
-  const frameBytes = Number(cfgBytes.value);
+  const requestedFrameBytes = Number(cfgBytes.value);
+  const frameBytes = cfgTransport.value === "optical"
+    ? Math.min(requestedFrameBytes, OPTICAL_TILE_PAYLOAD_BYTES)
+    : requestedFrameBytes;
   const ecc = cfgEcc.value as "L" | "M" | "Q" | "H";
   const displayPx = Number(cfgSize.value);
 
@@ -280,6 +285,23 @@ async function startStream(revealStage = false) {
     totalLen: payload.length,
     payloadFnv: fnv1a(payload),
   };
+
+  if (cfgTransport.value === "optical") {
+    startOpticalStream({
+      gen,
+      txFps,
+      frameBytes,
+      name,
+      fileSize,
+      compression,
+      transmittedSize,
+      encoder,
+      header,
+      displayPx,
+      revealStage,
+    });
+    return;
+  }
 
   let version: number | undefined; // locked after the first frame
   let modules = 0;
@@ -384,6 +406,99 @@ async function startStream(revealStage = false) {
     ctx.drawImage(staging, 0, 0, canvas.width, canvas.height);
     nextAt += interval;
     if (now - nextAt > 3 * interval) nextAt = now + interval; // fell behind — don't burst
+  };
+  requestAnimationFrame(tick);
+}
+
+function startOpticalStream(args: {
+  gen: number;
+  txFps: number;
+  frameBytes: number;
+  name: string;
+  fileSize: number;
+  compression: "none" | "gzip";
+  transmittedSize: number;
+  encoder: LTEncoder;
+  header: FrameHeader;
+  displayPx: number;
+  revealStage: boolean;
+}): void {
+  const { gen, txFps, frameBytes, name, fileSize, compression, transmittedSize, encoder, header, displayPx, revealStage } = args;
+  if (frameBytes > OPTICAL_TILE_PAYLOAD_BYTES) {
+    showError(`Optical grid supports at most ${OPTICAL_TILE_PAYLOAD_BYTES} bytes per frame.`);
+    return;
+  }
+  const staging = document.createElement("canvas");
+  const queue: ImageData[] = [];
+  let scale = 1;
+  let nextSeq = 0;
+  stage.hidden = false;
+
+  const sizeCanvas = (rasterSize: number) => {
+    const dpr = window.devicePixelRatio || 1;
+    const containerWidth = stage.parentElement?.getBoundingClientRect().width ?? window.innerWidth;
+    const stageStyle = getComputedStyle(stage);
+    const horizontalChrome = Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight) + Number.parseFloat(stageStyle.borderLeftWidth) + Number.parseFloat(stageStyle.borderRightWidth);
+    const cssBudget = fitQrDisplaySize(window.innerWidth, window.innerHeight, containerWidth, displayPx, horizontalChrome);
+    scale = Math.max(1, Math.floor((cssBudget * dpr) / rasterSize));
+    staging.width = rasterSize;
+    staging.height = rasterSize;
+    canvas.width = rasterSize * scale;
+    canvas.height = rasterSize * scale;
+    canvas.style.width = `${(rasterSize * scale) / dpr}px`;
+    canvas.style.height = `${(rasterSize * scale) / dpr}px`;
+  };
+
+  const makeFrame = (): ImageData => {
+    const tiles = [0, 1, 2, 3].map((index) => ({
+      index,
+      count: 4,
+      payload: packFrame({ ...header, seq: nextSeq++ }, encoder.encode(nextSeq - 1)),
+    }));
+    const raster = rasterizeOpticalGrid(tiles);
+    if (staging.width !== raster.size) {
+      sizeCanvas(raster.size);
+      resizeDisplay = () => sizeCanvas(raster.size);
+      if (revealStage) scrollStageIntoView();
+      setStatus(
+        `${txFps} FPS · ${frameBytes * 4} bytes / optical frame · ` +
+          `${name} · ${formatBytes(fileSize)} · ` +
+          `${compression === "gzip" ? `gzip ${formatBytes(transmittedSize)}` : "no compression"} · ` +
+          `K=${encoder.k}`,
+      );
+    }
+    return new ImageData(new Uint8ClampedArray(raster.pixels.buffer), raster.size, raster.size);
+  };
+
+  let generatorFailed = false;
+  const pump = (max = LOOKAHEAD) => {
+    if (generatorFailed || gen !== generation) return;
+    try {
+      for (let n = 0; n < max && queue.length < LOOKAHEAD; n++) queue.push(makeFrame());
+    } catch (err) {
+      generatorFailed = true;
+      showError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  pump();
+  const interval = 1000 / txFps;
+  let nextAt = performance.now();
+  const tick = (now: number) => {
+    if (gen !== generation || generatorFailed) return;
+    requestAnimationFrame(tick);
+    if (now < nextAt) return;
+    const img = queue.shift();
+    pump(1);
+    if (!img) {
+      nextAt = now + interval;
+      return;
+    }
+    staging.getContext("2d")!.putImageData(img, 0, 0);
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(staging, 0, 0, canvas.width, canvas.height);
+    nextAt += interval;
+    if (now - nextAt > 3 * interval) nextAt = now + interval;
   };
   requestAnimationFrame(tick);
 }
