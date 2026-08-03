@@ -25,7 +25,8 @@ receiver works out which one is arriving from the container's media type.
 
 ```bash
 npm install
-npm run dev               # dev server with HMR
+npm run dev               # local HTTP dev server with HMR
+npm run dev:lan           # HTTPS dev server for a phone on the LAN
 npm run serve             # build, then serve the production bundle
 npm run demo              # demo mode: only the bundled payloads can be sent
 npm test                  # golden wire-format vectors and unit tests
@@ -43,10 +44,10 @@ the dev server, not a hardened kiosk: the picker markup is still in the DOM
 (inert, and hidden), and anyone with the machine's keyboard has devtools.
 
 - On the **sending** device (a laptop is ideal): open
-  `https://localhost:5173/send/`, choose a file, and it starts streaming. Max
+  `http://localhost:5173/send/` for local testing, choose a file, and it starts streaming. Max
   screen brightness helps.
 - On the **receiving** device (a phone): open the `Network` URL Vite prints
-  (`https://<lan-ip>:5173/receive/`), accept the certificate warning once,
+  (`https://<lan-ip>:5173/receive/` from `npm run dev:lan`), accept the certificate warning once,
   tap **Start camera**, and point it at the code.
 - When recovery completes, save the received file after its SHA-256 check
   passes.
@@ -120,12 +121,12 @@ The site build uses `base: "./"`, so it works under a project subpath
 (`user.github.io/repo/`) with no configuration.
 
 
-**Why the dev server is https-only:** the receiver uses `getUserMedia`, and
-browsers remove that API entirely on insecure origins: a phone reaching
-your dev server over plain http has no camera, full stop (`localhost` is
-exempt, but your phone isn't localhost). That's a web platform rule, not a
-choice. The dev server therefore ships with a self-signed certificate
-(`@vitejs/plugin-basic-ssl`); the browser will warn on first visit. Tap
+**Why LAN development uses HTTPS:** the receiver uses `getUserMedia`, and
+browsers remove that API entirely on insecure origins. `localhost` is a secure
+context exception, so `npm run dev` works without a certificate warning on the
+same machine. A phone is not localhost, so use `npm run dev:lan`; it ships with
+a self-signed certificate (`@vitejs/plugin-basic-ssl`) and the browser will
+warn on first visit. Tap
 "Show Details" then "visit this website" (iOS) or "Advanced" then "Proceed"
 (Android/desktop), and the page is still a secure context, so the camera
 works. The odd-looking `lvh.me` hosts Vite prints are a public convenience
@@ -195,13 +196,12 @@ capture/decode rates and busy workers, making a saturated decoder visible.
 
 | setting | default | notes |
 |---|---|---|
-| profile | Reliable | 24 FPS and 1465 bytes/frame for ordinary phones, monitors, and longer distances |
-| tx fps | 24 | use 60 with the Dense profile on a 120 Hz sender when the receiver is close and stable |
-| bytes / frame | 1465 (QR v27) | the safer density for arbitrary monitors or a distant camera; Dense uses 2953 (QR v40) |
+| profile | Compatibility | 20 FPS and 1000 bytes/frame for the widest device range |
+| tx fps | 20 | use Balanced or Dense when the receiver is close and stable |
+| bytes / frame | 1000 (QR v20) | Compatibility is the safest starting point; Dense uses 2953 (QR v40) |
 
-The Reliable profile is the default. For a best-case close-range demo, choose
-the Dense profile. If a dense transfer crawls, switch back to Reliable or drop
-bytes/frame to 1465 and tx fps to 24.
+Compatibility is the default. For a close-range transfer, choose Balanced or
+Dense. If a dense transfer crawls, switch back to Compatibility.
 
 Frames are bounded to the largest QR byte payload supported by this build
 (2953 bytes, QR version 40 at ECC L), and both frame headers and optical file

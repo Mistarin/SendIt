@@ -117,7 +117,7 @@ function applyMode(): void {
   paneFile.hidden = mode !== "file";
   paneSnippet.hidden = mode !== "snippet";
   // The heading used to say "Send a file" even with Text snippet selected.
-  toolTitle.textContent = mode === "snippet" ? "Send text" : "Send a file";
+  toolTitle.textContent = "SEND";
   setStatus(mode === "snippet" ? "Paste or type some text to begin" : "Choose a file to begin");
   // A file left in the picker survives the switch, so re-arm it rather than
   // leaving a filename on screen next to "choose a file to begin".
@@ -214,7 +214,6 @@ async function main() {
   window.addEventListener("resize", () => resizeDisplay?.());
   for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize]) {
     el.addEventListener("change", () => {
-      if (el === cfgFps || el === cfgBytes) cfgProfile.value = "custom";
       void startStream();
     });
   }

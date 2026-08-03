@@ -8,11 +8,12 @@
 export const NO_SIGNAL_HINT_FRAME_BYTES = 1465;
 export const NO_SIGNAL_HINT_TX_FPS = 24;
 
-export const DEFAULT_TX_FPS = NO_SIGNAL_HINT_TX_FPS;
-export const DEFAULT_FRAME_BYTES = NO_SIGNAL_HINT_FRAME_BYTES;
+export const DEFAULT_TX_FPS = 20;
+export const DEFAULT_FRAME_BYTES = 1000;
 
 export const SEND_PRESETS = {
-  reliable: { txFps: NO_SIGNAL_HINT_TX_FPS, frameBytes: NO_SIGNAL_HINT_FRAME_BYTES },
+  compatibility: { txFps: 20, frameBytes: 1000 },
+  balanced: { txFps: NO_SIGNAL_HINT_TX_FPS, frameBytes: NO_SIGNAL_HINT_FRAME_BYTES },
   dense: { txFps: 60, frameBytes: 2953 },
 } as const;
 

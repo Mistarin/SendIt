@@ -15,8 +15,9 @@ import { FRAME_BYTES_OPTIONS, SEND_PRESETS, TX_FPS_OPTIONS } from "../shared/sen
  *  really on offer, not a copy that can drift. */
 const OFFERED = FRAME_BYTES_OPTIONS;
 
-test("the sender exposes both canonical profiles", () => {
-  assert.deepEqual(SEND_PRESETS.reliable, { txFps: 24, frameBytes: 1465 });
+test("the sender exposes the three canonical profiles", () => {
+  assert.deepEqual(SEND_PRESETS.compatibility, { txFps: 20, frameBytes: 1000 });
+  assert.deepEqual(SEND_PRESETS.balanced, { txFps: 24, frameBytes: 1465 });
   assert.deepEqual(SEND_PRESETS.dense, { txFps: 60, frameBytes: 2953 });
   assert.ok(TX_FPS_OPTIONS.includes(60));
   assert.ok(FRAME_BYTES_OPTIONS.includes(2953));

@@ -27,11 +27,11 @@ import { rootPwaHead } from "./build/root-pwa-head";
 // the build still works under any subpath.
 const SITE_URL = process.env.VITE_SITE_URL ?? "https://bashalarmistalt.github.io/decimen-optical-transfer/";
 
-// HTTPS always: the receiver needs getUserMedia, and on insecure origins
-// that API does not exist at all — a phone reaching this server over the LAN
-// gets no camera on plain http (browser rule, localhost-only exemption).
-// The generated cert is self-signed: tap through the warning once on the
-// phone and the page is still a secure context, so the camera works.
+// LAN/demo mode uses the generated self-signed certificate because a phone
+// reaching this server is not localhost and getUserMedia requires HTTPS.
+// The default local dev server stays on HTTP: browsers treat localhost as a
+// secure context, so local testing no longer shows a misleading certificate
+// warning. Use `npm run dev:lan` when the receiver is another device.
 //
 // Modes:
 //   (default)           the site — three pages, PWA, offline after first visit
@@ -116,7 +116,9 @@ export default defineConfig(({ mode }) => {
     base: "./",
     plugins: [
       htmlTokens(TOKENS),
-      basicSsl(),
+      ...(mode === "demo" || mode === "lan" || process.env.VITE_DEV_HTTPS === "1"
+        ? [basicSsl()]
+        : []),
       VitePWA({
         registerType: "autoUpdate",
         // We inject our own registration — see rootPwaHead().
